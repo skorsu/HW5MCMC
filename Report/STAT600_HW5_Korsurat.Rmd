@@ -16,6 +16,8 @@ library(doParallel)
 library(ggplot2)
 library(latex2exp)
 library(gridExtra)
+library(HDInterval)
+library(nimble)
 
 path <- "/Users/kevin-imac/Desktop/Github - Repo/"
 if(! file.exists(path)){
@@ -27,14 +29,156 @@ sourceCpp(paste0(path, "HW5MCMC/src/main.cpp"))
 
 All Rcpp/RcppArmadillo can be found in my [\textcolor{red}{GitHub}](https://github.com/skorsu/HW5MCMC).
 
+# (a)
+
+Below is the derivation of the likelihood function, $p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right)$.
+
+$$\begin{aligned}
+p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) &= \prod_{j=1}^{112}P\left(X_{j}|\lambda_{1}, \lambda_{2}, \alpha\right) \\
+&= \left[\prod_{j=1}^{\theta}\frac{e^{-\lambda_{1}}\lambda_{1}^{X_{j}}}{X_{j}!}\right] \left[\prod_{j=\theta+1}^{112}\frac{e^{-\lambda_{2}}\lambda_{2}^{X_{j}}}{X_{j}!}\right] \\
+&=\frac{\lambda_{1}^{\sum_{j=1}^{\theta}X_{j}}e^{-\lambda_{1}\theta}\lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}}e^{-\lambda_{2}\left(112-\theta\right)}}{\prod_{j=1}^{112}X_{j}!} \\
+&\propto \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)}
+\end{aligned}$$
+
+In order to perform Gibbs sampler, we need four conditional probabilities derived below.
+
+$$\begin{aligned}
+p\left(\theta|\lambda_{1}, \lambda_{2}, \alpha, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
+&\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) \\
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)} \frac{1}{111} \mathbb{I}_{\theta \in \{1, 2, \cdots, 111\}} \\
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\theta\left(\lambda_{1} - \lambda_{2}\right)} \mathbb{I}_{\theta \in \{1, 2, \cdots, 111\}}
+\end{aligned}$$
+
+$$\begin{aligned}
+p\left(\lambda_{1}|\theta, \lambda_{2}, \alpha, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
+&\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\lambda_{1}|\alpha\right) \\
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)}\frac{\alpha^{3}}{\Gamma\left(3\right)}\lambda_{1}^{2}e^{-\alpha\lambda_{1}} \\
+&\propto \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} e^{-\lambda_{1}\theta} \lambda_{1}^{2} e^{-\alpha\lambda_{1}} \\
+&\propto \lambda_{1}^{2 + \sum_{j=1}^{\theta}X_{j}} e^{-\lambda_{1}\left(\theta + \alpha\right)} \\
+&\equiv \text{Gamma}\left(3 + \sum_{j=1}^{\theta}X_{j}, \theta + \alpha\right)
+\end{aligned}$$
+
+$$\begin{aligned}
+p\left(\lambda_{2}|\theta, \lambda_{1}, \alpha, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
+&\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\lambda_{2}|\alpha\right) \\
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)}\frac{\alpha^{3}}{\Gamma\left(3\right)}\lambda_{2}^{2}e^{-\alpha\lambda_{2}} \\
+&\propto \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{2}\left(112-\theta\right)} \lambda_{2}^{2} e^{-\alpha\lambda_{2}} \\
+&\propto \lambda_{2}^{2 + \sum_{j=\theta + 1}^{112}X_{j}} e^{-\lambda_{2}\left(112 - \theta + \alpha\right)} \\
+&\equiv \text{Gamma}\left(3 + \sum_{j=\theta + 1}^{112}X_{j}, 112 - \theta + \alpha\right)
+\end{aligned}$$
+
+$$\begin{aligned}
+p\left(\alpha|\theta, \lambda_{1}, \lambda_{2}, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
+&\propto p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
+&= \frac{\alpha^{3}}{\Gamma\left(3\right)}\lambda_{1}^{2}e^{-\alpha\lambda_{1}} \frac{\alpha^{3}}{\Gamma\left(3\right)}\lambda_{2}^{2}e^{-\alpha\lambda_{2}} \frac{10}{\Gamma\left(10\right)}\alpha^{9}e^{-10\alpha} \\
+&\propto \alpha^{18}e^{-\alpha\left(10 + \lambda_{1} + \lambda_{2}\right)} \\
+&\equiv \text{Gamma}\left(19, 10 + \lambda_{1} + \lambda_{2}\right)
+\end{aligned}$$
+
+# (b)
+
+I will run the model for 50,000 iterations while letting the first 10,000 iterations as a burn-in.
+
 ```{r}
 
-### User-defined functions -----------------------------------------------------
-meanSD <- function(x, dplace = 5){
+### Import the data
+dat <- read.table(paste0(path, "HW5MCMC/coal.dat"), header = TRUE)
+
+### Run the model
+set.seed(31807)
+result <- gibbsGamma(iter = 50000, dat = dat$disasters)
+```
+
+```{r}
+
+### Function: Trace plot
+tpGGplot <- function(resultMat, colIndex, burnin, yLab, titleLab){
+  totiter <- nrow(result)
+  data.frame(iter = 1:(totiter - burnin), result = result[-(1:burnin), colIndex]) %>%
+    ggplot(aes(x = iter, y = result)) +
+    geom_line() +
+    theme_bw() +
+    labs(x = "Iteration (After burn-in)", y = yLab, title = titleLab)
+}
+
+p1 <- tpGGplot(result, 1, 10000, TeX("n"), "Trace plot: n")
+p2 <- tpGGplot(result, 2, 10000, TeX("$\\lambda_{1}$"), TeX("Trace plot: $\\lambda_{1}$"))
+p3 <- tpGGplot(result, 3, 10000, TeX("$\\lambda_{2}$"), TeX("Trace plot: $\\lambda_{2}$"))
+p4 <- tpGGplot(result, 4, 10000, TeX("$\\alpha$"), TeX("Trace plot: $\\alpha$"))
+
+grid.arrange(p1, p2, p3, p4)
+```
+
+# (c)
+
+```{r, message=FALSE}
+
+meanSD <- function(x, dplace = 3){
   mm <- round(mean(x), digits = dplace)
   ss <- round(sd(x), digits = dplace)
   paste0(mm, " (SD = ", ss, ")")
 }
+
+### Mean and SD
+data.frame(sapply(1:4, function(x){meanSD(result[-(1:10000), x])})) %>%
+  `rownames<-`(c("n", "lambda1", "lambda2", "alpha")) %>%
+  kable(col.names = "Mean (SD)")
+
+### HDI
+sapply(1:4, function(x){as.numeric(hdi(result[-(1:10000), x]))}) %>%
+  t() %>%
+  `rownames<-`(c("n", "lambda1", "lambda2", "alpha")) %>%
+  kable(col.names = c("95% Lower HPD", "95% Upper HPD"))
+
+### Function: Histogram
+htGGplot <- function(resultMat, colIndex, burnin, yLab, titleLab){
+  totiter <- nrow(result)
+  data.frame(iter = 1:(totiter - burnin), result = result[-(1:burnin), colIndex]) %>%
+    ggplot(aes(x = result)) +
+    geom_histogram() +
+    theme_bw() +
+    labs(y = yLab, title = titleLab)
+}
+
+h1 <- htGGplot(result, 1, 10000, TeX("n"), "Histogram: n")
+h2 <- htGGplot(result, 2, 10000, TeX("$\\lambda_{1}$"), TeX("Histogram: $\\lambda_{1}$"))
+h3 <- htGGplot(result, 3, 10000, TeX("$\\lambda_{2}$"), TeX("Histogram: $\\lambda_{2}$"))
+h4 <- htGGplot(result, 4, 10000, TeX("$\\alpha$"), TeX("Histogram: $\\alpha$"))
+
+grid.arrange(h1, h2, h3, h4)
+```
+
+
+# (d)
+
+# (e)
+
+For this question, I will let the prior for $\lambda_{i}$ to be the half-Normal distribution. Specifically, $p\left(\lambda_{i}|\sigma^{2}_{i}\right) = \frac{\sqrt{2}}{\sqrt{\pi \sigma^{2}_{i}}}e^{-\frac{\lambda_{i}^{2}}{2\sigma_{i}^{2}}}\mathbb{I}_{\lambda_{i} > 0}$ for i = 1, 2.
+
+The conditional probability for $\theta$ still be the same as in part (a). Below are the derivation for the conditional probability for $\lambda_{i}$.
+
+$$\begin{aligned}
+p\left(\lambda_{1}|\theta, \lambda_{2}, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}\right) p\left(\theta\right) p\left(\lambda_{1}\right) p\left(\lambda_{2}\right) \\
+&\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}\right) p\left(\lambda_{1}\right) \\
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)} \frac{\sqrt{2}}{\sqrt{\pi \sigma^{2}_{1}}}e^{-\frac{\lambda_{1}^{2}}{2\sigma_{1}^{2}}} \\
+&\propto \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} e^{-\lambda_{1}\theta-\frac{\lambda_{1}^{2}}{2\sigma^{2}_{1}}}
+\end{aligned}$$
+
+$$\begin{aligned}
+p\left(\lambda_{2}|\theta, \lambda_{1}, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}\right) p\left(\theta\right) p\left(\lambda_{1}\right) p\left(\lambda_{2}\right) \\
+&\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}\right) p\left(\lambda_{2}\right) \\
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)} \frac{\sqrt{2}}{\sqrt{\pi \sigma^{2}_{2}}}e^{-\frac{\lambda_{2}^{2}}{2\sigma_{2}^{2}}} \\
+&\propto \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{2}\left(112 - \theta\right)-\frac{\lambda_{2}^{2}}{2\sigma^{2}_{2}}}
+\end{aligned}$$
+
+# (f)
+
+Proposal distribution: $q\left(\lambda^{*}_{i}|\lambda_{i}\right) = \text{Gamma}\left(\lambda_{i}, 1\right)$.
+
+```{r}
+
+### Half-Normal
+resultHN <- gibbsHalfN(iter = 50000, s2_1 = 1, s2_2 = 1, dat = dat$disasters)
 ```
 
 \newpage
