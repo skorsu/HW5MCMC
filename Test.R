@@ -6,19 +6,6 @@ library(doParallel)
 library(Deriv)
 library(nimble)
 
-model <- nimbleCode({
-  # likelihood
-  survived ~ dbinom(theta, released)
-  # prior
-  theta ~ dunif(0, 1)
-  # derived quantity
-  lifespan <- -1/log(theta)
-})
-
-
-
-
-
 
 path <- "/Users/kevin-imac/Desktop/Github - Repo/"
 if(! file.exists(path)){
@@ -28,8 +15,25 @@ if(! file.exists(path)){
 dat <- read.table(paste0(path, "HW5MCMC/coal.dat"), header = TRUE)
 
 sourceCpp(paste0(path, "HW5MCMC/src/main.cpp"))
+test <- update_theta(lambda1 = 10, lambda2 = 5, dat = dat$disasters)
+sum(test)
+testBase <- rep(NA, 111)
+for(i in 1:111){
+  testBase[i] <- (1/1) ^ sum(dat$disasters[1:i])
+}
+
+testTheta <- rep(NA, 100000)
+for(i in 1:100000){
+  testTheta[i] <- update_theta(lambda1 = 1, lambda2 = 1, dat = dat$disasters)
+}
+hist(testTheta)
+table(testTheta)
+
 set.seed(10)
-result <- gibbsGamma(iter = 50000, dat = dat$disasters)
+result <- gibbsGamma(iter = 100000, dat = dat$disasters) 
+result <- gibbsGamma(iter = 100000, dat = dat$disasters) 
+
+plot(result[, 1], type = "l")
 
 result <- gibbsHalfN(iter = 50000, s2_1 = 1, s2_2 = 1, dat = dat$disasters)
 

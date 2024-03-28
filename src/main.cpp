@@ -3,29 +3,25 @@
 
 // Update Algorithms: ----------------------------------------------------------
 // [[Rcpp::export]]
-int update_theta(int theta_old, double lambda1, double lambda2, arma::vec dat){
+int update_theta(double lambda1, double lambda2, arma::vec dat){
   
-  // Propose a new theta from prior
-  Rcpp::IntegerVector thetapvec = Rcpp::sample(111, 1, false);
-  int theta_propose = thetapvec[0];
+  arma::vec unnorm_prob(111, arma::fill::zeros);
+  double firstSum = 0.0;
   
-  // Calculate the acceptance probability in the log-scale
-  double lprob = 0.0;
-  lprob += (arma::accu(dat.head_rows(theta_propose)) * std::log(lambda1));
-  lprob += (arma::accu(dat.head_rows(112 - theta_propose)) * std::log(lambda2));
-  lprob -= (-theta_propose * (lambda1 - lambda2));
-  lprob -= (arma::accu(dat.head_rows(theta_old)) * std::log(lambda1));
-  lprob -= (arma::accu(dat.head_rows(112 - theta_old)) * std::log(lambda2));
-  lprob += (-theta_old * (lambda1 - lambda2));
-  
-  // Decide
-  int theta_new = theta_old;
-  double logU = std::log(R::runif(0.0, 1.0));
-  if(logU < lprob){
-    theta_new = theta_propose;
+  // Unnormalized Probability
+  for(int i = 0; i < 111; ++i){
+    
+    firstSum = arma::accu(dat.head_rows(i + 1));
+    unnorm_prob[i] += std::pow((lambda1/lambda2), firstSum);
+    unnorm_prob[i] *= std::exp(-(i + 1) * (lambda1 - lambda2));
+    
   }
   
-  return theta_new;
+  // Normalized Probability
+  Rcpp::NumericVector norm_prob = Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(arma::normalise(unnorm_prob, 1)));
+  Rcpp::IntegerVector possible_k = Rcpp::seq(1, 111);
+  Rcpp::IntegerVector sampleK = Rcpp::sample(possible_k, 1, false, norm_prob);
+  return sampleK[0];
   
 }
 
@@ -65,11 +61,11 @@ double update_l2hn(double l2_old, int theta, double s2_2, arma::vec dat){
   
   // Calculate the acceptance probability in the log-scale
   double lprob = 0.0;
-  lprob += (arma::accu(dat.head_rows(112 - theta)) * std::log(l2_propose));
+  lprob += (arma::accu(dat.tail_rows(112 - theta)) * std::log(l2_propose));
   lprob -= (l2_propose * (112 - theta));
   lprob -= (std::pow(l2_propose, 2.0)/(2 * s2_2));
   lprob += R::dgamma(l2_old, l2_propose, 1, 1);
-  lprob -= (arma::accu(dat.head_rows(112 - theta)) * std::log(l2_old));
+  lprob -= (arma::accu(dat.tail_rows(112 - theta)) * std::log(l2_old));
   lprob += (l2_old * (112 - theta));
   lprob += (std::pow(l2_old, 2.0)/(2 * s2_2));
   lprob -= R::dgamma(l2_propose, l2_old, 1, 1);
@@ -92,9 +88,9 @@ arma::mat gibbsGamma(int iter, arma::vec dat){
   arma::mat result(iter, 4, arma::fill::zeros);
   
   // Initialize the parameters from prior
-  double ap = R::rgamma(10, 1/10);
-  double l1 = R::rgamma(3, 1/ap);
-  double l2 = R::rgamma(3, 1/ap);
+  double ap = 0.1;
+  double l1 = 0.1;
+  double l2 = 0.1;
   Rcpp::IntegerVector thetavec = Rcpp::sample(111, 1, false);
   int tt = thetavec[0];
   
@@ -104,9 +100,9 @@ arma::mat gibbsGamma(int iter, arma::vec dat){
   double ap_new = 0.0;
   
   for(int i = 0; i < iter; ++i){
-    tt_new = update_theta(tt, l1, l2, dat);
+    tt_new = update_theta(l1, l2, dat);
     l1_new = R::rgamma(3 + arma::accu(dat.head_rows(tt_new)), 1/(ap + tt_new));
-    l2_new = R::rgamma(3 + arma::accu(dat.head_rows(112 - tt_new)), 1/(ap + 112 - tt_new));
+    l2_new = R::rgamma(3 + arma::accu(dat.tail_rows(112 - tt_new)), 1/(ap + 112 - tt_new));
     ap_new = R::rgamma(19, 1/(10 + l1_new + l2_new));
     
     result.row(i).col(0).fill(tt_new);
@@ -141,7 +137,7 @@ arma::mat gibbsHalfN(int iter, double s2_1, double s2_2, arma::vec dat){
   double l2_new = 0.0;
   
   for(int i = 0; i < iter; ++i){
-    tt_new = update_theta(tt, l1, l2, dat);
+    tt_new = update_theta(l1, l2, dat);
     l1_new = update_l1hn(l1, tt_new, s2_1, dat);
     l2_new = update_l2hn(l2, tt_new, s2_2, dat);
     
@@ -158,6 +154,8 @@ arma::mat gibbsHalfN(int iter, double s2_1, double s2_2, arma::vec dat){
   return result;
   
 }
+
+
 
 // -----------------------------------------------------------------------------
 
