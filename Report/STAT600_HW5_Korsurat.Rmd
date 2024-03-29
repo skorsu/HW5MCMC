@@ -73,8 +73,8 @@ $$\begin{aligned}
 p\left(\alpha|\theta, \lambda_{1}, \lambda_{2}, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
 &\propto p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
 &= \frac{\alpha^{3}}{\Gamma\left(3\right)}\lambda_{1}^{2}e^{-\alpha\lambda_{1}} \frac{\alpha^{3}}{\Gamma\left(3\right)}\lambda_{2}^{2}e^{-\alpha\lambda_{2}} \frac{10}{\Gamma\left(10\right)}\alpha^{9}e^{-10\alpha} \\
-&\propto \alpha^{18}e^{-\alpha\left(10 + \lambda_{1} + \lambda_{2}\right)} \\
-&\equiv \text{Gamma}\left(19, 10 + \lambda_{1} + \lambda_{2}\right)
+&\propto \alpha^{15}e^{-\alpha\left(10 + \lambda_{1} + \lambda_{2}\right)} \\
+&\equiv \text{Gamma}\left(16, 10 + \lambda_{1} + \lambda_{2}\right)
 \end{aligned}$$
 
 # (b)

@@ -103,7 +103,7 @@ arma::mat gibbsGamma(int iter, arma::vec dat){
     tt_new = update_theta(l1, l2, dat);
     l1_new = R::rgamma(3 + arma::accu(dat.head_rows(tt_new)), 1/(ap + tt_new));
     l2_new = R::rgamma(3 + arma::accu(dat.tail_rows(112 - tt_new)), 1/(ap + 112 - tt_new));
-    ap_new = R::rgamma(19, 1/(10 + l1_new + l2_new));
+    ap_new = R::rgamma(16, 1/(10 + l1_new + l2_new));
     
     result.row(i).col(0).fill(tt_new);
     result.row(i).col(1).fill(l1_new);
