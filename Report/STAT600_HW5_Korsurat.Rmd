@@ -17,6 +17,7 @@ library(ggplot2)
 library(latex2exp)
 library(gridExtra)
 library(HDInterval)
+library(coda)
 library(nimble)
 
 path <- "/Users/kevin-imac/Desktop/Github - Repo/"
@@ -46,7 +47,8 @@ $$\begin{aligned}
 p\left(\theta|\lambda_{1}, \lambda_{2}, \alpha, \boldsymbol{X}\right) &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) p\left(\lambda_{1}|\alpha\right) p\left(\lambda_{2}|\alpha\right) p\left(\alpha\right) \\
 &\propto p\left(\boldsymbol{X}|\theta, \lambda_{1}, \lambda_{2}, \alpha\right) p\left(\theta\right) \\
 &= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\lambda_{1}\theta}  e^{-\lambda_{2}\left(112-\theta\right)} \frac{1}{111} \mathbb{I}_{\theta \in \{1, 2, \cdots, 111\}} \\
-&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\theta\left(\lambda_{1} - \lambda_{2}\right)} \mathbb{I}_{\theta \in \{1, 2, \cdots, 111\}}
+&= \lambda_{1}^{\sum_{j=1}^{\theta}X_{j}} \lambda_{2}^{\sum_{j=\theta+1}^{112}X_{j}} e^{-\theta\left(\lambda_{1} - \lambda_{2}\right)} \mathbb{I}_{\theta \in \{1, 2, \cdots, 111\}} \\
+&= \left(\frac{\lambda_{1}}{\lambda_{2}}\right)^{\sum_{j=1}^{\theta}X_{j}}  e^{-\theta\left(\lambda_{1} - \lambda_{2}\right)} \mathbb{I}_{\theta \in \{1, 2, \cdots, 111\}}
 \end{aligned}$$
 
 $$\begin{aligned}
@@ -77,79 +79,178 @@ p\left(\alpha|\theta, \lambda_{1}, \lambda_{2}, \boldsymbol{X}\right) &\propto p
 
 # (b)
 
-I will run the model for 50,000 iterations while letting the first 10,000 iterations as a burn-in.
+I will run the model for 50,000 iterations while letting the first 10,000 iterations serve as burn-in. Below are the trace plots for each parameter.
 
 ```{r}
 
 ### Import the data
 dat <- read.table(paste0(path, "HW5MCMC/coal.dat"), header = TRUE)
 
-### Run the model
-set.seed(31807)
-result <- gibbsGamma(iter = 50000, dat = dat$disasters)
+### Run the model (4 chains)
+set.seed(5, kind = "L'Ecuyer-CMRG")
+registerDoParallel(5)
+resultGamma <- foreach(t = 1:4) %dopar% {
+  
+  start_time <- Sys.time()
+  result <- gibbsGamma(iter = 50000, dat = dat$disasters)
+  run_time <- difftime(Sys.time(), start_time, units = "secs")
+  
+  list(run_time = run_time, result = result)
+  
+}
+stopImplicitCluster()
 ```
 
 ```{r}
 
-### Function: Trace plot
-tpGGplot <- function(resultMat, colIndex, burnin, yLab, titleLab){
-  totiter <- nrow(result)
-  data.frame(iter = 1:(totiter - burnin), result = result[-(1:burnin), colIndex]) %>%
-    ggplot(aes(x = iter, y = result)) +
+### Function: Trace plot from List
+ttGGPlot <- function(allChain, burn_in, yLab, titleLab){
+  ggplot(allChain, aes(x = iter, y = Estimate, color = Chain)) +
     geom_line() +
     theme_bw() +
-    labs(x = "Iteration (After burn-in)", y = yLab, title = titleLab)
+    theme(legend.position = "bottom") +
+    labs(x = "Iteration", y = yLab, title = titleLab) +
+    geom_vline(xintercept = burn_in, color = "red")
 }
 
-p1 <- tpGGplot(result, 1, 10000, TeX("n"), "Trace plot: n")
-p2 <- tpGGplot(result, 2, 10000, TeX("$\\lambda_{1}$"), TeX("Trace plot: $\\lambda_{1}$"))
-p3 <- tpGGplot(result, 3, 10000, TeX("$\\lambda_{2}$"), TeX("Trace plot: $\\lambda_{2}$"))
-p4 <- tpGGplot(result, 4, 10000, TeX("$\\alpha$"), TeX("Trace plot: $\\alpha$"))
+### Trace plot (all chains) for n
+p1 <- sapply(1:4, function(x){resultGamma[[x]]$result[, 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("n"), titleLab = "Trace plot: n")
+
+### Trace plot (all chains) for lambda_1
+p2 <- sapply(1:4, function(x){resultGamma[[x]]$result[, 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Trace plot: $\\lambda_{1}$"))
+
+### Trace plot (all chains) for lambda_2
+p3 <- sapply(1:4, function(x){resultGamma[[x]]$result[, 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Trace plot: $\\lambda_{2}$"))
+
+### Trace plot (all chains) for alpha
+p4 <- sapply(1:4, function(x){resultGamma[[x]]$result[, 4]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\alpha$"), titleLab = TeX("Trace plot: $\\alpha$"))
+
 
 grid.arrange(p1, p2, p3, p4)
 ```
 
+According to the result, we see that all parameters are mixing well in all 4 MCMC chains. This result can be confirmed by the Gelman-Rubin statistics (Rc). The result shows that the Rc for all chains, along with the Multivariate PSRF, is equal to 1, indicating that the MCMC results are converged.
+
+```{r}
+
+### Create the MCMC object
+mcmcGamma <- mcmc.list(lapply(1:4, function(x){mcmc(resultGamma[[x]]$result, start = 10001)}))
+gelman.diag(mcmcGamma)
+```
+
+The autocorrelation for each chain is shown in the tables below. The results illustrate that there is no autocorrelation for all parameters in all 4 chains. In conclusion, the MCMC is mixing well based on the provided diagnostic results.
+
+```{r}
+kable(autocorr.diag(mcmcGamma[[1]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2", "alpha"),
+      caption = "Autocorrelation of Chain 1 of the MCMC when using gamma distribution as a prior")
+
+kable(autocorr.diag(mcmcGamma[[2]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2", "alpha"),
+      caption = "Autocorrelation of Chain 2 of the MCMC when using gamma distribution as a prior")
+
+kable(autocorr.diag(mcmcGamma[[3]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2", "alpha"),
+      caption = "Autocorrelation of Chain 3 of the MCMC when using gamma distribution as a prior")
+
+kable(autocorr.diag(mcmcGamma[[4]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2", "alpha"),
+      caption = "Autocorrelation of Chain 4 of the MCMC when using gamma distribution as a prior")
+```
+
 # (c)
+
+Below are the density histogram plots for all parameters in all 4 chains.
 
 ```{r, message=FALSE}
 
-meanSD <- function(x, dplace = 3){
-  mm <- round(mean(x), digits = dplace)
-  ss <- round(sd(x), digits = dplace)
-  paste0(mm, " (SD = ", ss, ")")
-}
+### Plots
+d1 <- sapply(1:4, function(x){resultGamma[[x]]$result[-c(1:10000), 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  group_by(Chain, Estimate) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(x = Estimate, y = n)) +
+  geom_bar(stat = "identity") +
+  facet_grid(Chain ~ .) + 
+  labs(title = "Distribution of n", y = "Frequancy", x = "n")
 
-### Mean and SD
-data.frame(sapply(1:4, function(x){meanSD(result[-(1:10000), x])})) %>%
-  `rownames<-`(c("n", "lambda1", "lambda2", "alpha")) %>%
-  kable(col.names = "Mean (SD)")
-
-### HDI
-sapply(1:4, function(x){as.numeric(hdi(result[-(1:10000), x]))}) %>%
-  t() %>%
-  `rownames<-`(c("n", "lambda1", "lambda2", "alpha")) %>%
-  kable(col.names = c("95% Lower HPD", "95% Upper HPD"))
-
-### Function: Histogram
-htGGplot <- function(resultMat, colIndex, burnin, yLab, titleLab){
-  totiter <- nrow(result)
-  data.frame(iter = 1:(totiter - burnin), result = result[-(1:burnin), colIndex]) %>%
-    ggplot(aes(x = result)) +
-    geom_histogram() +
+dPlot <- function(allChain, xLab, titleLab){
+  ggplot(allChain, aes(x = Estimate, color = Chain)) +
+    geom_density() +
     theme_bw() +
-    labs(y = yLab, title = titleLab)
+    theme(legend.position = "bottom") +
+    labs(x = xLab, y = "Density", title = titleLab)
 }
 
-h1 <- htGGplot(result, 1, 10000, TeX("n"), "Histogram: n")
-h2 <- htGGplot(result, 2, 10000, TeX("$\\lambda_{1}$"), TeX("Histogram: $\\lambda_{1}$"))
-h3 <- htGGplot(result, 3, 10000, TeX("$\\lambda_{2}$"), TeX("Histogram: $\\lambda_{2}$"))
-h4 <- htGGplot(result, 4, 10000, TeX("$\\alpha$"), TeX("Histogram: $\\alpha$"))
+d2 <- sapply(1:4, function(x){resultGamma[[x]]$result[-c(1:10000), 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  dPlot(xLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Density plot: $\\lambda_{1}$"))
 
-grid.arrange(h1, h2, h3, h4)
+d3 <- sapply(1:4, function(x){resultGamma[[x]]$result[-c(1:10000), 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  dPlot(xLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Density plot: $\\lambda_{2}$"))
+
+d4 <- sapply(1:4, function(x){resultGamma[[x]]$result[-c(1:10000), 4]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  dPlot(xLab = TeX("$\\alpha$"), titleLab = TeX("Density plot: $\\alpha$"))
+
+d1
+d2
+d3
+d4
 ```
 
+The table below shows the mean and the 95% Highest Posterior Density (HPD) Interval for all parameters in all 4 chains.
+
+```{r}
+
+### Function: Mean and SD
+meanHDI <- function(x, dplace = 4){
+  hdiX <- round(as.numeric(hdi(x)), digits = dplace)
+  mm <- round(mean(x), digits = dplace)
+  paste0(mm, " (", hdiX[1], ", ", hdiX[2], ")")
+}
+
+sapply(1:4, function(x){apply(resultGamma[[x]]$result[-c(1:10000), ], 2, meanHDI)}) %>%
+  `rownames<-`(c("n", "ld 1", "ld 2", "alpha")) %>%
+  kable(col.names = paste0("Chain ", 1:4))
+```
+
+For the continuous random variables $(\lambda_{1}, \lambda_{2}, \text{ and } \alpha)$, I believe using the HPD interval is reasonable because it captures the highest density regions of the posterior distribution, providing a concise summary of parameter uncertainty. However, issues may arise when applying a 95% HPD interval to the discrete random variable $(n)$ as it may not accurately represent the discrete nature of the distribution, leading to potentially misleading interval estimates.
 
 # (d)
+
+In the context of this analysis, the parameters $\lambda_{1}$ and $\lambda_{2}$ represent the Poisson distribution parameters for two distinct groups. As highlighted in part (c), $\lambda_{1}$ exceeds $\lambda_{2}$, implying that the mean and standard deviation of disasters were higher during the initial stages of the coal-mining era compared to later periods. This trend aligns with the observed data, which depicts a decreasing trend in disaster occurrences over time. Moreover, the dispersion in the latter half of the era appears to decrease, with no more than one disaster per year, contrasting with the substantial number of disasters during the early stages.
+
+Transitioning to the parameter $\theta$, we can interpret it as the threshold that delineates the data into two segments. Conceptually, these segments represent distinct eras: one characterized by a high frequency of disasters predating technological advancements, and the other indicating a period marked by the implementation of safety measures to mitigate disasters. With the average value of $\theta$ hovering around 40, we can reasonably infer that 1891 signifies the onset of the era where such safety measures were introduced, thus leading to a reduction in disaster occurrences.
 
 # (e)
 
@@ -173,13 +274,477 @@ p\left(\lambda_{2}|\theta, \lambda_{1}, \boldsymbol{X}\right) &\propto p\left(\b
 
 # (f)
 
-Proposal distribution: $q\left(\lambda^{*}_{i}|\lambda_{i}\right) = \text{Gamma}\left(\lambda_{i}, 1\right)$.
+Since we does not have the closed form for the conditional probability of $\lambda_{1}$, and $\lambda_{2}$. I will apply the MH algorithm while letting the proposal distribution, $q\left(\lambda^{*}_{i}|\lambda_{i}\right)$, to be  $\text{Gamma}\left(\lambda_{i}, 1\right)$. In terms of $\sigma^{2}_{1}$ and $\sigma^{2}_{2}$, the hyperparameters, I will try three sets listed below:
+
+  - Non-informative: $\sigma^{2}_{1} = \sigma^{2}_{2} = 1000$
+  - Non-informative (with less disperse): $\sigma^{2}_{1} = \sigma^{2}_{2} = 10$
+  - Informative: $\sigma^{2}_{1} = 10$ and $\sigma^{2}_{2} = 1$ as seen in parts (c) and (d), indicate that in more recent years, there are fewer disasters, leading to the conclusion that the number of disasters is less dispersed in the latter years.
+
+Begin with the result from the first case, $\sigma^{2}_{1} = \sigma^{2}_{2} = 1000$.
 
 ```{r}
 
-### Half-Normal
-resultHN <- gibbsHalfN(iter = 50000, s2_1 = 1, s2_2 = 1, dat = dat$disasters)
+### Half-Normal (Non-informative: s2 = 1000)
+set.seed(5, kind = "L'Ecuyer-CMRG")
+registerDoParallel(5)
+resultHN1 <- foreach(t = 1:4) %dopar% {
+  
+  start_time <- Sys.time()
+  result <- gibbsHalfN(iter = 50000, s2_1 = 1000, s2_2 = 1000, dat = dat$disasters)
+  run_time <- difftime(Sys.time(), start_time, units = "secs")
+  
+  list(run_time = run_time, result = result)
+  
+}
+stopImplicitCluster()
+
+### Trace plot (all chains) for n
+p1 <- sapply(1:4, function(x){resultHN1[[x]]$result[, 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("n"), titleLab = TeX("Trace plot: n with $\\sigma^{2}_{1} = \\sigma^{2}_{2} = 1000$"))
+
+### Trace plot (all chains) for lambda_1
+p2 <- sapply(1:4, function(x){resultHN1[[x]]$result[, 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Trace plot: $\\lambda_{1}$ with $\\sigma^{2}_{1} = \\sigma^{2}_{2} = 1000$"))
+
+### Trace plot (all chains) for lambda_2
+p3 <- sapply(1:4, function(x){resultHN1[[x]]$result[, 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Trace plot: $\\lambda_{2}$ with $\\sigma^{2}_{1} = \\sigma^{2}_{2} = 1000$"))
+
+p1
+p2
+p3
+
+mcmcHN1 <- mcmc.list(lapply(1:4, function(x){mcmc(resultHN1[[x]]$result, start = 10001)}))
+gelman.diag(mcmcHN1)
+
+kable(autocorr.diag(mcmcHN1[[1]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 1 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1000)")
+
+kable(autocorr.diag(mcmcHN1[[2]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 2 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1000)")
+
+kable(autocorr.diag(mcmcHN1[[3]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 3 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1000)")
+
+kable(autocorr.diag(mcmcHN1[[4]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 4 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1000)")
 ```
+
+Below are the result from the second case, $\sigma^{2}_{1} = \sigma^{2}_{2} = 1$.
+
+```{r}
+
+### Half-Normal (Non-informative: s2 = 1)
+set.seed(5, kind = "L'Ecuyer-CMRG")
+registerDoParallel(5)
+resultHN2 <- foreach(t = 1:4) %dopar% {
+  
+  start_time <- Sys.time()
+  result <- gibbsHalfN(iter = 50000, s2_1 = 1, s2_2 = 1, dat = dat$disasters)
+  run_time <- difftime(Sys.time(), start_time, units = "secs")
+  
+  list(run_time = run_time, result = result)
+  
+}
+stopImplicitCluster()
+
+### Trace plot (all chains) for n
+p1 <- sapply(1:4, function(x){resultHN2[[x]]$result[, 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("n"), titleLab = TeX("Trace plot: n with $\\sigma^{2}_{1} = \\sigma^{2}_{2} = 1$"))
+
+### Trace plot (all chains) for lambda_1
+p2 <- sapply(1:4, function(x){resultHN2[[x]]$result[, 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Trace plot: $\\lambda_{1}$ with $\\sigma^{2}_{1} = \\sigma^{2}_{2} = 1$"))
+
+### Trace plot (all chains) for lambda_2
+p3 <- sapply(1:4, function(x){resultHN2[[x]]$result[, 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Trace plot: $\\lambda_{2}$ with $\\sigma^{2}_{1} = \\sigma^{2}_{2} = 1$"))
+
+p1
+p2
+p3
+
+mcmcHN2 <- mcmc.list(lapply(1:4, function(x){mcmc(resultHN2[[x]]$result, start = 10001)}))
+gelman.diag(mcmcHN2)
+
+kable(autocorr.diag(mcmcHN2[[1]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 1 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1)")
+
+kable(autocorr.diag(mcmcHN2[[2]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 2 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1)")
+
+kable(autocorr.diag(mcmcHN2[[3]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 3 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1)")
+
+kable(autocorr.diag(mcmcHN2[[4]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 4 of the MCMC when using Half-Normal distribution as a prior (s1 = s2 = 1)")
+```
+
+Last, we will use the informative prior, $\sigma^{2}_{1} = 10, \sigma^{2}_{2} = 1$.
+
+```{r}
+
+### Half-Normal (Informative: s21 = 10, s22 = 1)
+set.seed(5, kind = "L'Ecuyer-CMRG")
+registerDoParallel(5)
+resultHN3 <- foreach(t = 1:4) %dopar% {
+  
+  start_time <- Sys.time()
+  result <- gibbsHalfN(iter = 50000, s2_1 = 10, s2_2 = 1, dat = dat$disasters)
+  run_time <- difftime(Sys.time(), start_time, units = "secs")
+  
+  list(run_time = run_time, result = result)
+  
+}
+stopImplicitCluster()
+
+### Trace plot (all chains) for n
+p1 <- sapply(1:4, function(x){resultHN3[[x]]$result[, 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("n"), titleLab = TeX("Trace plot: n with the informative prior"))
+
+### Trace plot (all chains) for lambda_1
+p2 <- sapply(1:4, function(x){resultHN3[[x]]$result[, 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Trace plot: $\\lambda_{1}$ with the informative prior"))
+
+### Trace plot (all chains) for lambda_2
+p3 <- sapply(1:4, function(x){resultHN3[[x]]$result[, 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Trace plot: $\\lambda_{2}$ with the informative prior"))
+
+p1
+p2
+p3
+
+mcmcHN3 <- mcmc.list(lapply(1:4, function(x){mcmc(resultHN3[[x]]$result, start = 10001)}))
+gelman.diag(mcmcHN3)
+
+kable(autocorr.diag(mcmcHN3[[1]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 1 of the MCMC when using Half-Normal distribution as a prior with the informative prior")
+
+kable(autocorr.diag(mcmcHN3[[2]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 2 of the MCMC when using Half-Normal distribution as a prior with the informative prior")
+
+kable(autocorr.diag(mcmcHN3[[3]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 3 of the MCMC when using Half-Normal distribution as a prior with the informative prior")
+
+kable(autocorr.diag(mcmcHN3[[4]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("n", "lambda 1", "lambda 2"),
+      caption = "Autocorrelation of Chain 4 of the MCMC when using Half-Normal distribution as a prior with the informative prior")
+```
+
+Since the mixing for all sets of hyperparameters is similar (trace plots show convergence in all parameters, $R_c = 1$, and no autocorrelation), I would prefer using the non-informative prior. Therefore, I will proceed with using the first case ($s^2 = 1000$) to address the following questions.
+
+# (g)
+
+Below are the inference for the parameters when using the Half-Normal as a prior for $\lambda_{1}$ and $\lambda_{2}$. I will proceed by looking at the plots.
+
+```{r, message=FALSE}
+
+### Plots
+d1 <- sapply(1:4, function(x){resultHN1[[x]]$result[-c(1:10000), 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  group_by(Chain, Estimate) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(x = Estimate, y = n)) +
+  geom_bar(stat = "identity") +
+  facet_grid(Chain ~ .) + 
+  labs(title = "Distribution of n", y = "Frequancy", x = "n")
+
+dPlot <- function(allChain, xLab, titleLab){
+  ggplot(allChain, aes(x = Estimate, color = Chain)) +
+    geom_density() +
+    theme_bw() +
+    theme(legend.position = "bottom") +
+    labs(x = xLab, y = "Density", title = titleLab)
+}
+
+d2 <- sapply(1:4, function(x){resultHN1[[x]]$result[-c(1:10000), 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  dPlot(xLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Density plot: $\\lambda_{1}$"))
+
+d3 <- sapply(1:4, function(x){resultHN1[[x]]$result[-c(1:10000), 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  pivot_longer(paste0("Chain ", 1:4), names_to = "Chain", values_to = "Estimate") %>%
+  dPlot(xLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Density plot: $\\lambda_{2}$"))
+
+d1
+d2
+d3
+```
+
+Followed by the HPD interval for each parameter.
+
+```{r}
+sapply(1:4, function(x){apply(resultHN1[[x]]$result[-c(1:10000), ], 2, meanHDI)}) %>%
+  `rownames<-`(c("n", "ld 1", "ld 2")) %>%
+  kable(col.names = paste0("Chain ", 1:4))
+```
+
+According to the results, we might notice that the Half-Normal prior gives slightly higher estimates in all parameters compared to the Gamma prior. The trace plots for both priors look similar to each other. However, the density plots for $\lambda_{1}$ and $\lambda_{2}$ when using the Gamma prior are smoother than those for the Half-Normal prior.
+
+While we can set $\sigma^{2}$ to be extremely high to allow the model to explore the whole parameter space when using the Half-Normal prior, I would still prefer using the model with the Gamma prior as we can sample each parameter directly from the known distribution. Using the Half-Normal in this case prevents us from having a closed-form solution to the posterior distribution.
+
+# (h)
+
+```{r, message=FALSE}
+
+### Nimble: First Model
+NB_mod1 <- nimbleCode({
+  
+  ### Prior
+  theta ~ dunif(1, 112)
+  alpha ~ dgamma(10, 10)
+  lambda1 ~ dgamma(3, alpha)
+  lambda2 ~ dgamma(3, alpha)
+  
+  ### Likelihood
+  for (i in 1:N){
+    X[i] ~ dpois(lambda1 * step(theta - i) + lambda2 * (1 - step(theta - i)))
+  }
+  
+})
+
+NB_const <- list(N = dim(dat)[1]) ### Constant
+NB_data <- list(X = dat$disasters) ### Data
+NB_init_mod1 <- list(theta = 20, alpha = 0.1, lambda1 = 0.1, lambda2 = 0.1)
+save_param <- c("theta", "lambda1", "lambda2", "alpha")
+
+### Run the model
+set.seed(1)
+start_time <- Sys.time()
+NB_mod1_result <- nimbleMCMC(code = NB_mod1, constants = NB_const, data = NB_data, 
+                             inits = NB_init_mod1, niter = 50000, nburnin = 0, 
+                             nchains = 4, monitors = save_param)
+NB_mod1_time <- difftime(Sys.time(), start_time, units = "secs")
+```
+
+We begin by running the first model (Gamma prior) with Nimble. We might notice that the average computational time is `r round(as.numeric(NB_mod1_time)/4, 4)` seconds, slightly slower than when using Rcpp (`r round(mean(sapply(1:4, function(x){resultGamma[[x]]$run_time})), 4)` seconds). Another issue we might want to consider is that we can run the model in parallel if we use Rcpp. However, Nimble does not allow this, which means it will take longer to finish all chains in the long run.
+
+```{r}
+
+NB_mod1_result[[1]][, 4] <- floor(NB_mod1_result[[1]][, 4])
+NB_mod1_result[[2]][, 4] <- floor(NB_mod1_result[[2]][, 4])
+NB_mod1_result[[3]][, 4] <- floor(NB_mod1_result[[3]][, 4])
+NB_mod1_result[[4]][, 4] <- floor(NB_mod1_result[[4]][, 4])
+
+### Trace plot (all chains) for n
+p1 <- sapply(1:4, function(x){floor(NB_mod1_result[[x]][, 4])}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("n"), titleLab = TeX("Trace plot: n (Gamma Prior with Nimble)"))
+
+### Trace plot (all chains) for lambda_1
+p2 <- sapply(1:4, function(x){NB_mod1_result[[x]][, 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Trace plot: $\\lambda_{1}$ (Gamma Prior with Nimble)"))
+
+### Trace plot (all chains) for lambda_2
+p3 <- sapply(1:4, function(x){NB_mod1_result[[x]][, 3]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Trace plot: $\\lambda_{2}$ (Gamma Prior with Nimble)"))
+
+### Trace plot (all chains) for alpha
+p4 <- sapply(1:4, function(x){NB_mod1_result[[x]][, 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\alpha$"), titleLab = TeX("Trace plot: $\\alpha$ (Gamma Prior with Nimble)"))
+
+grid.arrange(p1, p2, p3, p4)
+```
+
+```{r}
+
+mcmcNB1 <- mcmc.list(lapply(1:4, function(x){mcmc(NB_mod1_result[[x]], start = 10001)}))
+gelman.diag(mcmcNB1)
+
+kable(autocorr.diag(mcmcNB1[[1]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("alpha", "lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 1 of the MCMC when using Gamma prior with Nimble")
+
+kable(autocorr.diag(mcmcNB1[[2]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("alpha", "lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 2 of the MCMC when using Gamma prior with Nimble")
+
+kable(autocorr.diag(mcmcNB1[[3]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("alpha", "lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 3 of the MCMC when using Gamma prior with Nimble")
+
+kable(autocorr.diag(mcmcNB1[[4]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("alpha", "lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 4 of the MCMC when using Gamma prior with Nimble")
+```
+
+
+```{r}
+sapply(1:4, function(x){apply(NB_mod1_result[[x]][-c(1:10000), c(4, 2, 3, 1)], 2, meanHDI)}) %>%
+  `rownames<-`(c("n", "ld 1", "ld 2", "alpha")) %>%
+  kable(col.names = paste0("Chain ", 1:4))
+```
+
+According to the results, we notice that both Nimble and Rcpp yield similar trace plots and estimates. However, in terms of autocorrelation, Rcpp performs better as the autocorrelation decreases faster compared to Nimble. In terms of $R_c$, both methods give the same result ($R_c = 1$)
+
+Then, we will run the second model (the Half-Normal prior) with Nimble.
+
+```{r, message=FALSE}
+
+### Nimble: Second Model
+NB_mod2 <- nimbleCode({
+  
+  ### Prior
+  theta ~ dunif(1, 112)
+  lambda1 ~ T(dnorm(0, var = 1000), 0, )
+  lambda2 ~ T(dnorm(0, var = 1000), 0, )
+  
+  ### Likelihood
+  for (i in 1:N){
+    X[i] ~ dpois(lambda1 * step(theta - i) + lambda2 * (1 - step(theta - i)))
+  }
+  
+})
+
+NB_const <- list(N = dim(dat)[1]) ### Constant
+NB_data <- list(X = dat$disasters) ### Data
+NB_init_mod2 <- list(theta = 20, lambda1 = 0.1, lambda2 = 0.1)
+save_param <- c("theta", "lambda1", "lambda2")
+
+### Run the model
+set.seed(1)
+start_time <- Sys.time()
+NB_mod2_result <- nimbleMCMC(code = NB_mod2, constants = NB_const, data = NB_data, 
+                             inits = NB_init_mod2, niter = 50000, nburnin = 0, 
+                             nchains = 4, monitors = save_param)
+NB_mod2_time <- difftime(Sys.time(), start_time, units = "secs")
+```
+
+Similarly, we might notice that the average computational time is `r round(as.numeric(NB_mod2_time)/4, 4)` seconds, slightly slower than when using Rcpp (`r round(mean(sapply(1:4, function(x){resultHN1[[x]]$run_time})), 4)` seconds).
+
+```{r}
+
+NB_mod2_result[[1]][, 3] <- floor(NB_mod2_result[[1]][, 3])
+NB_mod2_result[[2]][, 3] <- floor(NB_mod2_result[[2]][, 3])
+NB_mod2_result[[3]][, 3] <- floor(NB_mod2_result[[3]][, 3])
+NB_mod2_result[[4]][, 3] <- floor(NB_mod2_result[[4]][, 3])
+
+### Trace plot (all chains) for n
+p1 <- sapply(1:4, function(x){floor(NB_mod2_result[[x]][, 3])}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("n"), titleLab = TeX("Trace plot: n (HN Prior with Nimble)"))
+
+### Trace plot (all chains) for lambda_1
+p2 <- sapply(1:4, function(x){NB_mod2_result[[x]][, 1]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{1}$"), titleLab = TeX("Trace plot: $\\lambda_{1}$ (HN Prior with Nimble)"))
+
+### Trace plot (all chains) for lambda_2
+p3 <- sapply(1:4, function(x){NB_mod2_result[[x]][, 2]}) %>%
+  `colnames<-`(paste0("Chain ", 1:4)) %>%
+  as.data.frame() %>%
+  mutate(iter = 1:50000) %>%
+  pivot_longer(!iter, names_to = "Chain", values_to = "Estimate") %>%
+  ttGGPlot(burn_in = 10000, yLab = TeX("$\\lambda_{2}$"), titleLab = TeX("Trace plot: $\\lambda_{2}$ (HN Prior with Nimble)"))
+
+
+p1
+p2
+p3
+```
+
+```{r}
+
+mcmcNB2 <- mcmc.list(lapply(1:4, function(x){mcmc(NB_mod2_result[[x]], start = 10001)}))
+gelman.diag(mcmcNB2)
+
+kable(autocorr.diag(mcmcNB2[[1]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 1 of the MCMC when using HN prior with Nimble")
+
+kable(autocorr.diag(mcmcNB2[[2]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 2 of the MCMC when using HN prior with Nimble")
+
+kable(autocorr.diag(mcmcNB2[[3]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 3 of the MCMC when using HN prior with Nimble")
+
+kable(autocorr.diag(mcmcNB2[[4]], lags = c(0, 1, 5, 10, 100, 250)),
+      col.names = c("lambda 1", "lambda 2", "n"),
+      caption = "Autocorrelation of Chain 4 of the MCMC when using HN prior with Nimble")
+```
+
+```{r}
+sapply(1:4, function(x){apply(NB_mod2_result[[x]][-c(1:10000), c(3, 1, 2)], 2, meanHDI)}) %>%
+  `rownames<-`(c("n", "ld 1", "ld 2")) %>%
+  kable(col.names = paste0("Chain ", 1:4))
+```
+
+Similarly, both Rcpp and Nimble yield similar results. The only aspect where I believe Rcpp performs better is in managing autocorrelation among iterations.
 
 \newpage
 
